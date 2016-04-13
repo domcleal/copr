@@ -18,10 +18,13 @@ class CoprUserWhoosheer(AbstractWhoosheer):
             analyzer=whoosh.analysis.StandardAnalyzer(
                 expression=r"\w+(-\.?\w+)*"), field_boost=2),
         chroots=whoosh.fields.TEXT(field_boost=2),
+        packages=whoosh.fields.TEXT(
+            analyzer=whoosh.analysis.StandardAnalyzer(
+                expression=r"\s+", gaps=True), field_boost=2),
         description=whoosh.fields.TEXT(),
         instructions=whoosh.fields.TEXT())
 
-    models = [models.Copr, models.User]
+    models = [models.Copr, models.User] # there is StopIteration error when searching if I add models.Package to the list
 
     @classmethod
     def update_user(cls, writer, user):
@@ -35,9 +38,14 @@ class CoprUserWhoosheer(AbstractWhoosheer):
                                user_id=copr.owner.id,
                                username=copr.owner.name,
                                coprname=copr.name,
-                               chroots=cls.get_chroot_info(copr),
+                               chroots=cls.get_chroot_names(copr),
+                               packages=cls.get_package_names(copr),
                                description=copr.description,
                                instructions=copr.instructions)
+
+    @classmethod
+    def update_package(cls, writer, package):
+        writer.update_document(copr_id=package.copr.id, packages=cls.get_package_names(package.copr))
 
     @classmethod
     def insert_user(cls, writer, user):
@@ -50,17 +58,25 @@ class CoprUserWhoosheer(AbstractWhoosheer):
                             user_id=copr.owner.id,
                             username=copr.owner.name,
                             coprname=copr.name,
-                            chroots=cls.get_chroot_info(copr),
+                            chroots=cls.get_chroot_names(copr),
+                            packages=cls.get_package_names(copr),
                             description=copr.description,
                             instructions=copr.instructions)
+
+    @classmethod
+    def insert_package(cls, writer, package):
+        writer.update_document(copr_id=package.copr.id, packages=cls.get_package_names(package.copr))
 
     @classmethod
     def delete_copr(cls, writer, copr):
         writer.delete_by_term("copr_id", copr.id)
 
+    @classmethod
+    def delete_package(cls, writer, package):
+        writer.update_document(copr_id=package.copr.id, packages=cls.get_package_names(package.copr))
 
     @classmethod
-    def get_chroot_info(cls, copr):
+    def get_chroot_names(cls, copr):
         # NOTE: orm db session for Copr model is already commited at the point insert_*/update_* methods are called.
         # Hence we use db.engine directly (for a new session).
         result = db.engine.execute(
@@ -71,5 +87,15 @@ class CoprUserWhoosheer(AbstractWhoosheer):
             WHERE copr_chroot.copr_id={0}
             """.format(copr.id)
         )
-        return ["{}-{}-{}".format(t[0], t[1], t[2]) for t in result.fetchall()]
+        return ["{}-{}-{}".format(row[0], row[1], row[2]) for row in result.fetchall()]
 
+    @classmethod
+    def get_package_names(cls, copr):
+        result = db.engine.execute(
+            """
+            SELECT name
+            FROM package
+            WHERE copr_id={0}
+            """.format(copr.id)
+        )
+        return [row[0] for row in result.fetchall()]
